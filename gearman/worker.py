@@ -1,8 +1,9 @@
 import logging
 import random
 import sys
+import time
 
-from gearman import compat
+from gearman import compat, protocol
 from gearman.connection_manager import GearmanConnectionManager
 from gearman.worker_handler import GearmanWorkerCommandHandler
 from gearman.errors import ConnectionError
@@ -79,8 +80,14 @@ class GearmanWorker(GearmanConnectionManager):
 
         # Shuffle our connections after the poll timeout
         while continue_working:
+            #print "in worker loop, about to establish worker connections"
             worker_connections = self.establish_worker_connections()
+            #print "workers established, sending ECHOs"
+            for command_handler in self.handler_to_connection_map.iterkeys():
+                command_handler.send_command(protocol.GEARMAN_COMMAND_ECHO_REQ, data="HELLO THERE FROM WORKER")
+            print "[%s] echos sent.  polling connections" % time.asctime()
             continue_working = self.poll_connections_until_stopped(worker_connections, continue_while_connections_alive, timeout=poll_timeout)
+            #print "poll finished"
 
         # If we were kicked out of the worker loop, we should shutdown all our connections
         for current_connection in worker_connections:
