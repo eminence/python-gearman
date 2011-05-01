@@ -18,6 +18,9 @@ class GearmanClientCommandHandler(GearmanCommandHandler):
         self.requests_awaiting_handles = collections.deque()
         self.handle_to_request_map = dict()
 
+        # hang on to old handles in case a late STATUS_RES comes in referencing an old handle
+        self.old_handles = dict()
+
     ##################################################################
     ##### Public interface methods to be called by GearmanClient #####
     ##################################################################
@@ -55,7 +58,9 @@ class GearmanClientCommandHandler(GearmanCommandHandler):
 
     def _unregister_request(self, current_request):
         # De-allocate this request for all jobs
-        return self.handle_to_request_map.pop(current_request.job.handle, None)
+        old =  self.handle_to_request_map.pop(current_request.job.handle, None)
+        self.old_handles[current_request.job.handle] = old
+        return old
 
     ##################################################################
     ## Gearman command callbacks with kwargs defined by protocol.py ##
@@ -148,7 +153,16 @@ class GearmanClientCommandHandler(GearmanCommandHandler):
 
     def recv_status_res(self, job_handle, known, running, numerator, denominator):
         # If we received a STATUS_RES update about this request, update our known status
-        current_request = self.handle_to_request_map[job_handle]
+        if job_handle not in self.handle_to_request_map.keys():
+            # we've recieved a status about a job we don't know about, most likely because
+            # we've already recieved a WORK_COMPLETE message for this job. 
+            # if we can find the corresponding request in the old_handles dict, then use it.
+            if job_handle in self.old_handles.keys():
+                current_request = self.old_handles[job_handle] 
+            else:
+                raise InvalidClientState("Received a status for a job we don't know anything about!  job_handle=%r", job_handle)
+        else:
+            current_request = self.handle_to_request_map[job_handle]
 
         job_known = bool(known == '1')
         # Make our status response Python friendly
